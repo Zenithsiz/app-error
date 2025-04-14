@@ -1,13 +1,16 @@
 //! App errors
 //!
-//! This crate provides an error type, [`AppError`], that is ideal for usage in apps.
+//! This crate provides an error type, [`AppError`], that is intended for usage in apps.
 //!
 //! It is [`Send`], [`Sync`], `'static`, and importantly cheaply [`Clone`]-able.
 //!
-//! It is also able to store multiple errors at once and provide pretty-printing of all
-//! of these errors.
+//! To achieve this, it serializes every error it receives without owning it, meaning that
+//! you also can't retrieve the error later by downcasting it.
 //!
-//! The inner representation is currently just `Arc<(String, Option<AppError>) | Box<[AppError]>>`.
+//! It is also able to store multiple errors at once and provide pretty-printing of all
+//! of these them.
+//!
+//! The inner representation is similar to `AppError = (String, Option<AppError>) | Vec<AppError>`.
 
 // Features
 #![feature(error_reporter, decl_macro, try_trait_v2, extend_one, let_chains)]
@@ -30,7 +33,7 @@ use {
 	},
 };
 
-/// Inner
+/// Inner representation.
 enum Inner<D> {
 	/// Single error
 	Single {
