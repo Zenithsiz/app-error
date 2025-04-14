@@ -162,23 +162,6 @@ impl<D> AppError<D> {
 		}
 	}
 
-	/// Creates a new app error from an error and data.
-	///
-	/// `data` will be applied to all sources of `err`
-	pub fn new_with_data<E>(err: &E, data: D) -> Self
-	where
-		E: ?Sized + StdError,
-		D: Clone,
-	{
-		Self {
-			inner: Arc::new(Inner::Single {
-				msg: err.to_string(),
-				source: err.source().map(|source| Self::new_with_data(source, data.clone())),
-				data,
-			}),
-		}
-	}
-
 	/// Creates a new app error from a message
 	pub fn msg<M>(msg: M) -> Self
 	where
@@ -190,20 +173,6 @@ impl<D> AppError<D> {
 				msg:    msg.to_string(),
 				source: None,
 				data:   D::default(),
-			}),
-		}
-	}
-
-	/// Creates a new app error from a message
-	pub fn msg_with_data<M>(msg: M, data: D) -> Self
-	where
-		M: fmt::Display,
-	{
-		Self {
-			inner: Arc::new(Inner::Single {
-				msg: msg.to_string(),
-				source: None,
-				data,
 			}),
 		}
 	}
@@ -220,21 +189,6 @@ impl<D> AppError<D> {
 				msg:    msg.to_string(),
 				source: Some(self.clone()),
 				data:   D::default(),
-			}),
-		}
-	}
-
-	/// Adds context to this error
-	#[must_use = "Creates a new error with context, without modifying the existing one"]
-	pub fn context_with_data<M>(&self, msg: M, data: D) -> Self
-	where
-		M: fmt::Display,
-	{
-		Self {
-			inner: Arc::new(Inner::Single {
-				msg: msg.to_string(),
-				source: Some(self.clone()),
-				data,
 			}),
 		}
 	}
@@ -283,6 +237,54 @@ impl<D> AppError<D> {
 	#[must_use]
 	pub fn pretty(&self) -> PrettyDisplay<'_, D> {
 		PrettyDisplay::new(self)
+	}
+}
+
+impl<D> AppError<D> {
+	/// Creates a new app error from an error and data.
+	///
+	/// `data` will be applied to all sources of `err`
+	pub fn new_with_data<E>(err: &E, data: D) -> Self
+	where
+		E: ?Sized + StdError,
+		D: Clone,
+	{
+		Self {
+			inner: Arc::new(Inner::Single {
+				msg: err.to_string(),
+				source: err.source().map(|source| Self::new_with_data(source, data.clone())),
+				data,
+			}),
+		}
+	}
+
+	/// Creates a new app error from a message
+	pub fn msg_with_data<M>(msg: M, data: D) -> Self
+	where
+		M: fmt::Display,
+	{
+		Self {
+			inner: Arc::new(Inner::Single {
+				msg: msg.to_string(),
+				source: None,
+				data,
+			}),
+		}
+	}
+
+	/// Adds context to this error
+	#[must_use = "Creates a new error with context, without modifying the existing one"]
+	pub fn context_with_data<M>(&self, msg: M, data: D) -> Self
+	where
+		M: fmt::Display,
+	{
+		Self {
+			inner: Arc::new(Inner::Single {
+				msg: msg.to_string(),
+				source: Some(self.clone()),
+				data,
+			}),
+		}
 	}
 }
 
