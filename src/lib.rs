@@ -54,9 +54,9 @@ where
 {
 	fn source(&self) -> Option<&(dyn StdError + 'static)> {
 		match self {
-			Inner::Single { source, .. } => source.as_ref().map(AppError::as_std_error),
+			Self::Single { source, .. } => source.as_ref().map(AppError::as_std_error),
 			// For standard errors, just use the first source.
-			Inner::Multiple(errs) => errs.first().map(AppError::as_std_error),
+			Self::Multiple(errs) => errs.first().map(AppError::as_std_error),
 		}
 	}
 }
@@ -92,12 +92,12 @@ where
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		mem::discriminant(self).hash(state);
 		match self {
-			Inner::Single { msg, source, data } => {
+			Self::Single { msg, source, data } => {
 				msg.hash(state);
 				source.hash(state);
 				data.hash(state);
 			},
-			Inner::Multiple(errs) => errs.hash(state),
+			Self::Multiple(errs) => errs.hash(state),
 		}
 	}
 }
@@ -105,8 +105,8 @@ where
 impl<D> fmt::Display for Inner<D> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Inner::Single { msg, .. } => msg.fmt(f),
-			Inner::Multiple(errs) => write!(f, "Multiple errors ({})", errs.len()),
+			Self::Single { msg, .. } => msg.fmt(f),
+			Self::Multiple(errs) => write!(f, "Multiple errors ({})", errs.len()),
 		}
 	}
 }
@@ -119,13 +119,13 @@ where
 		match f.alternate() {
 			// With `:#?`, use a normal debug
 			true => match self {
-				Inner::Single { msg, source, data } => f
+				Self::Single { msg, source, data } => f
 					.debug_struct("AppError")
 					.field("msg", msg)
 					.field("source", source)
 					.field("data", data)
 					.finish(),
-				Inner::Multiple(errs) => f.debug_list().entries(errs).finish(),
+				Self::Multiple(errs) => f.debug_list().entries(errs).finish(),
 			},
 
 			// Otherwise, pretty print it
@@ -206,6 +206,7 @@ impl<D> AppError<D> {
 	}
 
 	/// Adds context to this error
+	#[must_use = "Creates a new error with context, without modifying the existing one"]
 	pub fn context<M>(&self, msg: M) -> Self
 	where
 		M: fmt::Display,
@@ -221,6 +222,7 @@ impl<D> AppError<D> {
 	}
 
 	/// Adds context to this error
+	#[must_use = "Creates a new error with context, without modifying the existing one"]
 	pub fn context_with_data<M>(&self, msg: M, data: D) -> Self
 	where
 		M: fmt::Display,
@@ -257,6 +259,7 @@ impl<D> AppError<D> {
 	}
 
 	/// Returns this type as a [`std::error::Error`]
+	#[must_use]
 	pub fn as_std_error(&self) -> &(dyn StdError + 'static)
 	where
 		D: fmt::Debug + 'static,
@@ -265,6 +268,7 @@ impl<D> AppError<D> {
 	}
 
 	/// Converts this type as into a [`std::error::Error`]
+	#[must_use]
 	pub fn into_std_error(self) -> Arc<dyn StdError + Send + Sync + 'static>
 	where
 		D: fmt::Debug + Send + Sync + 'static,
@@ -382,7 +386,7 @@ impl<T, D> Context<D> for Result<T, AppError<D>>
 where
 	D: Default,
 {
-	type Output = Result<T, AppError<D>>;
+	type Output = Self;
 
 	fn context<M>(self, msg: M) -> Self::Output
 	where

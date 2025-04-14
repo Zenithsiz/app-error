@@ -50,6 +50,7 @@ impl<'a, D> PrettyDisplay<'a, D> {
 	}
 
 	/// Adds a callback that chooses whether to ignore an error
+	#[must_use]
 	pub fn with_ignore_err(self, ignore_err: fn(&AppError<D>, &D) -> bool) -> Self {
 		Self {
 			ignore_err: Some(ignore_err),
