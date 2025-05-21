@@ -193,6 +193,23 @@ impl<D> AppError<D> {
 		}
 	}
 
+	/// Adds context to this error
+	#[must_use = "Creates a new error with context, without modifying the existing one"]
+	pub fn with_context<F, M>(&self, with_msg: F) -> Self
+	where
+		F: Fn() -> M,
+		M: fmt::Display,
+		D: Default,
+	{
+		Self {
+			inner: Arc::new(Inner::Single {
+				msg:    with_msg().to_string(),
+				source: Some(self.clone()),
+				data:   D::default(),
+			}),
+		}
+	}
+
 	/// Creates a new app error from multiple errors
 	pub fn from_multiple<Errs>(errs: Errs) -> Self
 	where
@@ -281,6 +298,22 @@ impl<D> AppError<D> {
 		Self {
 			inner: Arc::new(Inner::Single {
 				msg: msg.to_string(),
+				source: Some(self.clone()),
+				data,
+			}),
+		}
+	}
+
+	/// Adds context to this error
+	#[must_use = "Creates a new error with context, without modifying the existing one"]
+	pub fn with_context_with_data<F, M>(&self, with_msg: F, data: D) -> Self
+	where
+		F: Fn() -> M,
+		M: fmt::Display,
+	{
+		Self {
+			inner: Arc::new(Inner::Single {
+				msg:    with_msg().to_string(),
 				source: Some(self.clone()),
 				data,
 			}),
