@@ -13,7 +13,7 @@
 //! The inner representation is similar to `AppError = (String, Option<AppError>) | Vec<AppError>`.
 
 // Features
-#![feature(error_reporter, decl_macro, try_trait_v2, extend_one, let_chains)]
+#![feature(error_reporter, decl_macro, try_trait_v2, extend_one)]
 
 // Modules
 mod multiple;
@@ -313,7 +313,7 @@ impl<D> AppError<D> {
 	{
 		Self {
 			inner: Arc::new(Inner::Single {
-				msg:    with_msg().to_string(),
+				msg: with_msg().to_string(),
 				source: Some(self.clone()),
 				data,
 			}),
