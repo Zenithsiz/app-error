@@ -39,7 +39,7 @@ enum Inner<D> {
 	/// Single error
 	Single {
 		/// Message
-		msg: String,
+		msg: Arc<str>,
 
 		/// Source
 		source: Option<AppError<D>>,
@@ -156,7 +156,7 @@ impl<D> AppError<D> {
 	{
 		Self {
 			inner: Arc::new(Inner::Single {
-				msg:    err.to_string(),
+				msg:    err.to_string().into(),
 				source: err.source().map(Self::new),
 				data:   D::default(),
 			}),
@@ -171,7 +171,7 @@ impl<D> AppError<D> {
 	{
 		Self {
 			inner: Arc::new(Inner::Single {
-				msg:    msg.to_string(),
+				msg:    msg.to_string().into(),
 				source: None,
 				data:   D::default(),
 			}),
@@ -187,7 +187,7 @@ impl<D> AppError<D> {
 	{
 		Self {
 			inner: Arc::new(Inner::Single {
-				msg:    msg.to_string(),
+				msg:    msg.to_string().into(),
 				source: Some(self.clone()),
 				data:   D::default(),
 			}),
@@ -204,7 +204,7 @@ impl<D> AppError<D> {
 	{
 		Self {
 			inner: Arc::new(Inner::Single {
-				msg:    with_msg().to_string(),
+				msg:    with_msg().to_string().into(),
 				source: Some(self.clone()),
 				data:   D::default(),
 			}),
@@ -309,7 +309,7 @@ impl<D> AppError<D> {
 	{
 		Self {
 			inner: Arc::new(Inner::Single {
-				msg: err.to_string(),
+				msg: err.to_string().into(),
 				source: err.source().map(|source| Self::new_with_data(source, data.clone())),
 				data,
 			}),
@@ -323,7 +323,7 @@ impl<D> AppError<D> {
 	{
 		Self {
 			inner: Arc::new(Inner::Single {
-				msg: msg.to_string(),
+				msg: msg.to_string().into(),
 				source: None,
 				data,
 			}),
@@ -338,7 +338,7 @@ impl<D> AppError<D> {
 	{
 		Self {
 			inner: Arc::new(Inner::Single {
-				msg: msg.to_string(),
+				msg: msg.to_string().into(),
 				source: Some(self.clone()),
 				data,
 			}),
@@ -354,7 +354,7 @@ impl<D> AppError<D> {
 	{
 		Self {
 			inner: Arc::new(Inner::Single {
-				msg: with_msg().to_string(),
+				msg: with_msg().to_string().into(),
 				source: Some(self.clone()),
 				data,
 			}),
