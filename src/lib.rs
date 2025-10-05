@@ -34,6 +34,7 @@ use {
 };
 
 /// Inner representation.
+#[derive(Clone)]
 enum Inner<D> {
 	/// Single error
 	Single {
@@ -229,6 +230,46 @@ impl<D> AppError<D> {
 	{
 		Self {
 			inner: Arc::new(Inner::Multiple(errs.into_iter().map(Self::new).collect())),
+		}
+	}
+
+	/// Flattens all neighbor multiple errors into a single one.
+	#[must_use]
+	pub fn flatten(self) -> Self
+	where
+		D: Clone,
+	{
+		/// Gathers all multiple errors from `err` into `flattened_errs`, recursively
+		fn flatten_into<D: Clone>(err: AppError<D>, flattened_errs: &mut Vec<AppError<D>>) {
+			let err = err.flatten();
+			match &*err.inner {
+				Inner::Single { .. } => flattened_errs.push(err),
+				Inner::Multiple(errs) =>
+					for err in errs {
+						flatten_into(err.clone(), flattened_errs);
+					},
+			}
+		}
+
+		match Arc::unwrap_or_clone(self.inner) {
+			// If we're a single error, recurse
+			Inner::Single { msg, source, data } => Self {
+				inner: Arc::new(Inner::Single {
+					msg,
+					source: source.map(Self::flatten),
+					data,
+				}),
+			},
+
+			// Otherwise, flatten all errors
+			Inner::Multiple(errs) => {
+				let mut flattened_errs = vec![];
+				for err in errs {
+					flatten_into(err, &mut flattened_errs);
+				}
+
+				Self::from_multiple(flattened_errs)
+			},
 		}
 	}
 
@@ -499,4 +540,48 @@ pub macro ensure {
 			do yeet $crate::app_error!($fmt, $($arg),*);
 		}
 	},
+}
+
+#[cfg(test)]
+mod test {
+	#[test]
+	fn flatten_simple() {
+		type AppError = crate::AppError<()>;
+		let err = AppError::from_multiple([
+			AppError::from_multiple([AppError::msg("A"), AppError::msg("B")]),
+			AppError::msg("C"),
+			AppError::from_multiple([
+				AppError::from_multiple([
+					AppError::msg("D"),
+					AppError::from_multiple([AppError::msg("E"), AppError::msg("F")]),
+				]),
+				AppError::from_multiple([
+					AppError::from_multiple([AppError::msg("H"), AppError::msg("I")]),
+					AppError::msg("J"),
+				])
+				.context("G1")
+				.context("G2"),
+			]),
+		]);
+
+		let found = err.flatten();
+		let expected = AppError::from_multiple([
+			AppError::msg("A"),
+			AppError::msg("B"),
+			AppError::msg("C"),
+			AppError::msg("D"),
+			AppError::msg("E"),
+			AppError::msg("F"),
+			AppError::from_multiple([AppError::msg("H"), AppError::msg("I"), AppError::msg("J")])
+				.context("G1")
+				.context("G2"),
+		]);
+
+		assert!(
+			found == expected,
+			"Flattened error was wrong.\nExpected: {}\nFound: {}",
+			expected.pretty(),
+			found.pretty()
+		);
+	}
 }
