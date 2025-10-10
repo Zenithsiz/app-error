@@ -14,6 +14,7 @@
 
 // Features
 #![feature(error_reporter, decl_macro, try_trait_v2, extend_one)]
+#![cfg_attr(test, feature(assert_matches, coverage_attribute))]
 
 // Modules
 mod multiple;
@@ -134,6 +135,7 @@ where
 			},
 
 			// Otherwise, pretty print it
+			// TODO: Use our own pretty printer instead of this.
 			false => std::error::Report::new(self).pretty(true).fmt(f),
 		}
 	}
@@ -555,11 +557,354 @@ pub macro ensure {
 }
 
 #[cfg(test)]
+#[cfg_attr(test, coverage(off))]
 mod test {
+	use {
+		super::*,
+		std::{assert_matches::assert_matches, collections::HashSet},
+	};
+
+	/// Error implementing `StdError` for testing.
+	#[derive(Clone, Debug)]
+	struct StdE {
+		msg:   &'static str,
+		inner: Option<Box<Self>>,
+	}
+	impl StdError for StdE {
+		fn source(&self) -> Option<&(dyn StdError + 'static)> {
+			self.inner.as_deref().map(|err| err as &dyn StdError)
+		}
+	}
+	impl fmt::Display for StdE {
+		fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+			self.msg.fmt(f)
+		}
+	}
+
+	#[test]
+	fn std_error_source() {
+		let err = AppError::<()>::msg("A");
+		assert_matches!(err.as_std_error().source(), None);
+		assert_matches!(err.into_std_error().source(), None);
+
+		let err = AppError::<()>::msg("A").context("B");
+		assert_matches!(err.as_std_error().source(), Some(err) if err.to_string() == "A");
+		assert_matches!(err.into_std_error().source(), Some(err) if err.to_string() == "A");
+
+		let err = AppError::<()>::from_multiple([AppError::msg("A"), AppError::msg("B")]);
+		assert_matches!(err.as_std_error().source(), Some(err) if err.to_string() == "A");
+		assert_matches!(err.into_std_error().source(), Some(err) if err.to_string() == "A");
+	}
+
+	#[test]
+	fn std_error_fmt() {
+		let err = AppError::<()>::msg("A");
+		assert_eq!(err.as_std_error().to_string(), "A");
+		assert_eq!(err.into_std_error().to_string(), "A");
+
+		let err = AppError::<()>::msg("A").context("B");
+		assert_eq!(err.as_std_error().to_string(), "B");
+		assert_eq!(err.into_std_error().to_string(), "B");
+
+		let err = AppError::<()>::from_multiple([AppError::msg("A"), AppError::msg("B")]);
+		assert_eq!(err.as_std_error().to_string(), "Multiple errors (2)");
+		assert_eq!(err.into_std_error().to_string(), "Multiple errors (2)");
+	}
+
+	#[test]
+	fn from_std_error() {
+		let std_err = StdE {
+			msg:   "A",
+			inner: Some(Box::new(StdE {
+				msg:   "B",
+				inner: None,
+			})),
+		};
+
+		let found = AppError::<()>::new(&std_err);
+		assert_eq!(found, AppError::from(std_err));
+		let expected = AppError::msg("B").context("A");
+		assert!(
+			found == expected,
+			"Converted error was wrong.\nExpected: {}\nFound: {}",
+			expected.pretty(),
+			found.pretty()
+		);
+	}
+
+	#[test]
+	fn from_multiple_std_error() {
+		let std_errs = [
+			StdE {
+				msg:   "A",
+				inner: Some(Box::new(StdE {
+					msg:   "B",
+					inner: None,
+				})),
+			},
+			StdE {
+				msg:   "C",
+				inner: Some(Box::new(StdE {
+					msg:   "D",
+					inner: None,
+				})),
+			},
+		];
+
+		let found = AppError::<()>::from_multiple_std(&std_errs);
+		let expected =
+			AppError::<()>::from_multiple([AppError::msg("B").context("A"), AppError::msg("D").context("C")]);
+		assert!(
+			found == expected,
+			"Converted error was wrong.\nExpected: {}\nFound: {}",
+			expected.pretty(),
+			found.pretty()
+		);
+	}
+
+	#[test]
+	fn eq() {
+		let err_a1 = AppError::<()>::msg("A");
+		assert_eq!(err_a1, err_a1);
+		assert_eq!(err_a1.clone(), err_a1);
+
+		let err_a2 = AppError::<()>::msg("A");
+		assert_eq!(err_a1, err_a2);
+
+		let err_b = AppError::<()>::msg("B");
+		assert_ne!(err_a1, err_b);
+	}
+
+	#[test]
+	fn eq_context() {
+		let err1 = AppError::<()>::msg("A").context("B");
+		assert_eq!(err1, err1);
+
+		let err2 = AppError::<()>::msg("A").context("B");
+		assert_eq!(err1, err2);
+
+		let err3 = AppError::<()>::msg("A").context("C");
+		assert_ne!(err1, err3);
+
+		let err4 = AppError::<()>::msg("B").context("C");
+		assert_ne!(err3, err4);
+	}
+
+	#[test]
+	fn eq_multiple() {
+		let err_multiple1 = AppError::<()>::from_multiple([AppError::msg("A"), AppError::msg("B")]);
+		assert_eq!(err_multiple1, err_multiple1);
+		assert_eq!(err_multiple1.clone(), err_multiple1);
+
+		let err_single = AppError::<()>::msg("A");
+		assert_ne!(err_multiple1, err_single);
+
+		let err_multiple2 = AppError::<()>::from_multiple([AppError::msg("A"), AppError::msg("B")]);
+		assert_eq!(err_multiple1, err_multiple2);
+
+		let err_multiple3 = AppError::<()>::from_multiple([AppError::msg("B"), AppError::msg("A")]);
+		assert_ne!(err_multiple1, err_multiple3);
+	}
+
+	#[test]
+	fn hash() {
+		let mut errs = HashSet::new();
+		let err = AppError::<()>::msg("A");
+		assert!(errs.insert(err.clone()));
+		assert!(!errs.insert(err));
+		assert!(!errs.insert(AppError::<()>::msg("A")));
+
+		let err_multiple = AppError::<()>::from_multiple([AppError::msg("A"), AppError::msg("B")]);
+		assert!(errs.insert(err_multiple.clone()));
+		assert!(!errs.insert(err_multiple));
+		assert!(!errs.insert(AppError::<()>::from_multiple([AppError::msg("A"), AppError::msg("B")])));
+	}
+
+	#[test]
+	fn fmt_debug() {
+		let err = AppError::<()>::msg("A").context("B");
+		assert_eq!(format!("{err:?}"), "B\n\nCaused by:\n      A");
+		assert_eq!(
+			format!("{err:#?}"),
+			r#"AppError {
+    msg: "B",
+    source: Some(
+        AppError {
+            msg: "A",
+            source: None,
+            data: (),
+        },
+    ),
+    data: (),
+}"#
+		);
+
+		let err_multiple = AppError::<()>::from_multiple([AppError::msg("A"), AppError::msg("B")]);
+		assert_eq!(
+			format!("{err_multiple:?}"),
+			"Multiple errors (2)\n\nCaused by:\n      A"
+		);
+		assert_eq!(
+			format!("{err_multiple:#?}"),
+			r#"[
+    AppError {
+        msg: "A",
+        source: None,
+        data: (),
+    },
+    AppError {
+        msg: "B",
+        source: None,
+        data: (),
+    },
+]"#
+		);
+	}
+
+	#[test]
+	fn fmt() {
+		assert_eq!(AppError::<()>::fmt("ABC").to_string(), "ABC");
+	}
+
+	#[test]
+	fn with_context() {
+		assert_eq!(
+			AppError::<()>::msg("A").context("B"),
+			AppError::<()>::msg("A").with_context(|| "B")
+		);
+	}
+
+	#[test]
+	fn ext_traits() {
+		let std_err = StdE {
+			msg:   "B",
+			inner: Some(Box::new(StdE {
+				msg:   "C",
+				inner: None,
+			})),
+		};
+
+		assert_eq!(
+			Err::<(), StdE>(std_err.clone()).context("A"),
+			Err(AppError::<()>::msg("C").context("B").context("A"))
+		);
+		assert_eq!(
+			Err::<(), StdE>(std_err).with_context(|| "A"),
+			Err(AppError::<()>::msg("C").context("B").context("A"))
+		);
+
+		assert_eq!(
+			Err::<(), AppError>(AppError::msg("C").context("B")).context("A"),
+			Err(AppError::<()>::msg("C").context("B").context("A"))
+		);
+		assert_eq!(
+			Err::<(), AppError>(AppError::msg("C").context("B")).with_context(|| "A"),
+			Err(AppError::<()>::msg("C").context("B").context("A"))
+		);
+
+		assert_eq!(None::<()>.context("A"), Err(AppError::<()>::msg("A")));
+		assert_eq!(None::<()>.with_context(|| "A"), Err(AppError::<()>::msg("A")));
+	}
+
+	#[test]
+	fn data() {
+		#[derive(Clone)]
+		struct D;
+		let std_err = StdE {
+			msg:   "B",
+			inner: Some(Box::new(StdE {
+				msg:   "C",
+				inner: None,
+			})),
+		};
+
+		// TODO: Once we implement data accessors, test them here.
+		//       For now we just test that these work and don't panic.
+		let _err = AppError::<D>::new_with_data(&std_err, D);
+		let _err = AppError::<D>::msg_with_data("A", D);
+		let err = AppError::<D>::fmt_with_data("A", D);
+		let err = err.context_with_data("B", D);
+		let _err = err.with_context_with_data(|| "C", D);
+	}
+
+	#[test]
+	fn pretty() {
+		let err = AppError::<()>::msg("A").context("B").context("C");
+		assert_eq!(
+			format!("{:?}", err.pretty()),
+			"PrettyDisplay { root: C\n\nCaused by:\n   0: B\n   1: A }"
+		);
+		assert_eq!(
+			err.pretty().to_string(),
+			r"C
+└─B
+  └─A"
+		);
+
+		let err_multiple = AppError::<()>::from_multiple([AppError::msg("A"), AppError::msg("B")]);
+		assert_eq!(
+			err_multiple.pretty().to_string(),
+			r"Multiple errors:
+├─A
+└─B"
+		);
+
+		let err_multiple_deep = AppError::<()>::from_multiple([
+			AppError::from_multiple([AppError::msg("A"), AppError::msg("B")])
+				.context("C")
+				.context("D"),
+			AppError::msg("E"),
+		]);
+		assert_eq!(
+			err_multiple_deep.pretty().to_string(),
+			r"Multiple errors:
+├─D
+│ └─C
+│   └─Multiple errors:
+│     ├─A
+│     └─B
+└─E"
+		);
+	}
+
+	#[test]
+	fn pretty_ignore() {
+		#[derive(Default)]
+		struct D {
+			ignore: bool,
+		}
+
+		let fmt_err = |err: &AppError<D>| err.pretty().with_ignore_err(|_err, data| data.ignore).to_string();
+
+		// TODO: This is not correct behavior, we shouldn't display the ignored errors just because there's no multiple
+		let err = AppError::<D>::msg_with_data("A", D { ignore: true }).context("B");
+		assert_eq!(fmt_err(&err), "B\n└─A");
+
+		let err_multiple_deep = AppError::<D>::from_multiple([
+			AppError::from_multiple([AppError::msg("A"), AppError::msg_with_data("B", D { ignore: true })])
+				.context("C")
+				.context("D"),
+			AppError::msg_with_data("E", D { ignore: true }),
+			AppError::msg_with_data("F", D { ignore: true }).context("G"),
+			AppError::msg("H").context_with_data("I", D { ignore: true }),
+			AppError::msg("J"),
+		]);
+		assert_eq!(
+			fmt_err(&err_multiple_deep),
+			r"Multiple errors:
+├─D
+│ └─C
+│   └─Multiple errors:
+│     ├─A
+│     └─(1 ignored errors)
+├─J
+└─(3 ignored errors)"
+		);
+	}
+
 	#[test]
 	fn flatten_simple() {
-		type AppError = crate::AppError<()>;
-		let err = AppError::from_multiple([
+		let err = AppError::<()>::from_multiple([
 			AppError::from_multiple([AppError::msg("A"), AppError::msg("B")]),
 			AppError::msg("C"),
 			AppError::from_multiple([
