@@ -13,7 +13,15 @@
 //! The inner representation is similar to `AppError = (String, Option<AppError>) | Vec<AppError>`.
 
 // Features
-#![feature(decl_macro, try_trait_v2, extend_one, debug_closure_helpers, try_blocks)]
+#![feature(
+	decl_macro,
+	try_trait_v2,
+	extend_one,
+	debug_closure_helpers,
+	try_blocks,
+	never_type,
+	unwrap_infallible
+)]
 #![cfg_attr(test, feature(assert_matches, coverage_attribute, yeet_expr))]
 
 // Modules
@@ -25,7 +33,7 @@ pub use self::{multiple::AllErrs, pretty::PrettyDisplay};
 
 // Imports
 use {
-	core::mem,
+	core::{mem, ops::Try},
 	std::{
 		borrow::Cow,
 		error::Error as StdError,
@@ -311,6 +319,58 @@ impl<D> AppError<D> {
 	#[must_use]
 	pub fn pretty(&self) -> PrettyDisplay<'_, D> {
 		PrettyDisplay::new(&self.inner)
+	}
+
+	/// Returns if any data in this error matches `predicate`
+	pub fn data_any<P: FnMut(&D) -> bool>(&self, mut predicate: P) -> bool {
+		fn inner<D, P: FnMut(&D) -> bool>(err: &AppError<D>, predicate: &mut P) -> bool {
+			match &*err.inner {
+				Inner::Single { source, data, .. } =>
+					predicate(data) || source.as_ref().is_some_and(|err| inner(err, predicate)),
+				Inner::Multiple(errs) => errs.iter().any(|err| inner(err, predicate)),
+			}
+		}
+
+		inner(self, &mut predicate)
+	}
+
+	/// Visits all data within this error
+	pub fn data_visit<V>(&self, mut visitor: V)
+	where
+		V: FnMut(&D),
+	{
+		self.data_try_visit::<Result<(), !>, _>(|data| {
+			visitor(data);
+			Ok(())
+		})
+		.into_ok();
+	}
+
+	/// Tries to visit all data within this error
+	pub fn data_try_visit<T, V>(&self, mut visitor: V) -> T
+	where
+		T: Try<Output = ()>,
+		V: FnMut(&D) -> T,
+	{
+		fn inner<D, T, V>(err: &AppError<D>, visitor: &mut V) -> T
+		where
+			T: Try<Output = ()>,
+			V: FnMut(&D) -> T,
+		{
+			match &*err.inner {
+				Inner::Single { source, data, .. } => {
+					visitor(data)?;
+					if let Some(source) = source {
+						inner(source, visitor)?;
+					}
+
+					T::from_output(())
+				},
+				Inner::Multiple(errs) => errs.iter().try_for_each(|err| inner(err, visitor)),
+			}
+		}
+
+		inner(self, &mut visitor)
 	}
 }
 
@@ -822,24 +882,98 @@ mod test {
 	}
 
 	#[test]
-	fn data() {
-		#[derive(Clone)]
-		struct D;
+	fn data_from_std() {
+		#[derive(PartialEq, Clone, Debug)]
+		struct D(usize);
+
 		let std_err = StdE {
-			msg:   "B",
+			msg:   "A",
 			inner: Some(Box::new(StdE {
-				msg:   "C",
+				msg:   "B",
 				inner: None,
 			})),
 		};
 
-		// TODO: Once we implement data accessors, test them here.
-		//       For now we just test that these work and don't panic.
-		let _err = AppError::<D>::new_with_data(&std_err, D);
-		let _err = AppError::<D>::msg_with_data("A", D);
-		let err = AppError::<D>::fmt_with_data("A", D);
-		let err = err.context_with_data("B", D);
-		let _err = err.with_context_with_data(|| "C", D);
+		let err = AppError::<D>::new_with_data(&std_err, D(5));
+		assert!(err.data_any(|d| d.0 == 5));
+		let mut count = 0;
+		err.data_visit(|d| {
+			assert_eq!(d.0, 5);
+			count += 1;
+		});
+		assert_eq!(count, 2);
+		assert_eq!(
+			err,
+			AppError::<D>::msg_with_data("B", D(5)).with_context_with_data(|| "A", D(5))
+		);
+	}
+
+	#[test]
+	fn data() {
+		#[derive(PartialEq, Clone, Debug)]
+		struct D(usize);
+
+		let err = AppError::<D>::fmt_with_data("B", D(4)).context_with_data("A", D(5));
+		assert!(err.data_any(|d| d.0 == 4));
+		assert!(err.data_any(|d| d.0 == 5));
+		let mut count = 0;
+		err.data_visit(|d| {
+			match count {
+				0 => assert_eq!(d.0, 5),
+				1 => assert_eq!(d.0, 4),
+				_ => unreachable!(),
+			}
+			count += 1;
+		});
+		assert_eq!(count, 2);
+
+		assert_eq!(
+			err.data_try_visit(|d| match d.0 {
+				5 => Err(()),
+				4 => panic!("Visited data after error"),
+				_ => unreachable!(),
+			}),
+			Err(())
+		);
+		assert_eq!(
+			err.data_try_visit(|d| match d.0 {
+				5 => Ok(()),
+				4 => Err(()),
+				_ => unreachable!(),
+			}),
+			Err(())
+		);
+	}
+
+	#[test]
+	fn data_multiple() {
+		#[derive(PartialEq, Clone, Debug)]
+		struct D(usize);
+
+		let err = AppError::from_multiple([AppError::msg_with_data("A", D(1)), AppError::msg_with_data("B", D(2))]);
+		assert!(err.data_any(|d| match d.0 {
+			1 => true,
+			2 => panic!("Visited data after true"),
+			_ => unreachable!(),
+		}));
+
+		let mut count = 0;
+		err.data_visit(|d| {
+			match count {
+				0 => assert_eq!(d.0, 1),
+				1 => assert_eq!(d.0, 2),
+				_ => unreachable!(),
+			}
+			count += 1;
+		});
+		assert_eq!(count, 2);
+	}
+
+	#[test]
+	fn data_empty() {
+		let err_empty = AppError::<!>::from_multiple([]);
+		assert!(!err_empty.data_any(|_| panic!("Visited data")));
+		err_empty.data_visit(|_| panic!("Visited data"));
 	}
 
 	#[test]
