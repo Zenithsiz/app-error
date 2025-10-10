@@ -13,8 +13,8 @@
 //! The inner representation is similar to `AppError = (String, Option<AppError>) | Vec<AppError>`.
 
 // Features
-#![feature(decl_macro, try_trait_v2, extend_one, debug_closure_helpers)]
-#![cfg_attr(test, feature(assert_matches, coverage_attribute))]
+#![feature(decl_macro, try_trait_v2, extend_one, debug_closure_helpers, try_blocks)]
+#![cfg_attr(test, feature(assert_matches, coverage_attribute, yeet_expr))]
 
 // Modules
 mod multiple;
@@ -521,22 +521,29 @@ where
 /// A macro that formats and creates an [`AppError`]
 pub macro app_error {
 	($msg:expr $(,)?) => {
-		$crate::AppError::msg( format!($msg) )
+		// TODO: Check if it's a static string as compile time?
+		match format_args!($msg) {
+			msg => match msg.as_str() {
+				Some(msg) => $crate::AppError::msg(msg),
+				None => $crate::AppError::fmt( ::std::fmt::format(msg) )
+			}
+		}
+
 	},
 
 	($fmt:expr, $($arg:expr),* $(,)?) => {
-		$crate::AppError::msg( format!($fmt, $($arg,)*) )
+		$crate::AppError::fmt( format!($fmt, $($arg,)*) )
 	},
 }
 
 /// A macro that returns an error
 pub macro bail {
 	($msg:expr $(,)?) => {
-		do yeet $crate::app_error!($msg);
+		do yeet $crate::app_error!($msg)
 	},
 
 	($fmt:expr, $($arg:expr),* $(,)?) => {
-		do yeet $crate::app_error!($fmt, $($arg),*);
+		do yeet $crate::app_error!($fmt, $($arg),*)
 	},
 }
 
@@ -928,6 +935,37 @@ mod test {
 ├─J
 └─(3 ignored errors)"
 		);
+	}
+
+	#[test]
+	fn macros_static() {
+		assert_eq!(app_error!("A"), AppError::<()>::msg("A"));
+
+		#[expect(clippy::diverging_sub_expression)]
+		let res: Result<(), AppError> = try { bail!("A") };
+		assert_eq!(res, Err(AppError::<()>::msg("A")));
+
+		let res: Result<(), AppError> = try { ensure!(true, "A") };
+		assert_eq!(res, Ok(()));
+
+		let res: Result<(), AppError> = try { ensure!(false, "A") };
+		assert_eq!(res, Err(AppError::<()>::msg("A")));
+	}
+
+	#[test]
+	fn macros_fmt() {
+		let value = 5;
+		assert_eq!(app_error!("A{value}"), AppError::<()>::msg("A5"));
+
+		#[expect(clippy::diverging_sub_expression)]
+		let res: Result<(), AppError> = try { bail!("A{value}") };
+		assert_eq!(res, Err(AppError::<()>::msg("A5")));
+
+		let res: Result<(), AppError> = try { ensure!(true, "A{value}") };
+		assert_eq!(res, Ok(()));
+
+		let res: Result<(), AppError> = try { ensure!(false, "A{value}") };
+		assert_eq!(res, Err(AppError::<()>::msg("A5")));
 	}
 
 	#[test]
