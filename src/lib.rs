@@ -26,6 +26,7 @@ pub use self::{multiple::AllErrs, pretty::PrettyDisplay};
 use {
 	core::mem,
 	std::{
+		borrow::Cow,
 		error::Error as StdError,
 		fmt,
 		hash::{Hash, Hasher},
@@ -39,7 +40,7 @@ enum Inner<D> {
 	/// Single error
 	Single {
 		/// Message
-		msg: Arc<str>,
+		msg: Cow<'static, str>,
 
 		/// Source
 		source: Option<AppError<D>>,
@@ -164,7 +165,22 @@ impl<D> AppError<D> {
 	}
 
 	/// Creates a new app error from a message
-	pub fn msg<M>(msg: M) -> Self
+	#[must_use]
+	pub fn msg(msg: &'static str) -> Self
+	where
+		D: Default,
+	{
+		Self {
+			inner: Arc::new(Inner::Single {
+				msg:    msg.into(),
+				source: None,
+				data:   D::default(),
+			}),
+		}
+	}
+
+	/// Creates a new app error from a formattable message
+	pub fn fmt<M>(msg: M) -> Self
 	where
 		M: fmt::Display,
 		D: Default,
@@ -180,14 +196,13 @@ impl<D> AppError<D> {
 
 	/// Adds context to this error
 	#[must_use = "Creates a new error with context, without modifying the existing one"]
-	pub fn context<M>(&self, msg: M) -> Self
+	pub fn context(&self, msg: &'static str) -> Self
 	where
-		M: fmt::Display,
 		D: Default,
 	{
 		Self {
 			inner: Arc::new(Inner::Single {
-				msg:    msg.to_string().into(),
+				msg:    msg.into(),
 				source: Some(self.clone()),
 				data:   D::default(),
 			}),
@@ -198,7 +213,7 @@ impl<D> AppError<D> {
 	#[must_use = "Creates a new error with context, without modifying the existing one"]
 	pub fn with_context<F, M>(&self, with_msg: F) -> Self
 	where
-		F: Fn() -> M,
+		F: FnOnce() -> M,
 		M: fmt::Display,
 		D: Default,
 	{
@@ -317,7 +332,18 @@ impl<D> AppError<D> {
 	}
 
 	/// Creates a new app error from a message
-	pub fn msg_with_data<M>(msg: M, data: D) -> Self
+	pub fn msg_with_data(msg: &'static str, data: D) -> Self {
+		Self {
+			inner: Arc::new(Inner::Single {
+				msg: msg.into(),
+				source: None,
+				data,
+			}),
+		}
+	}
+
+	/// Creates a new app error from a formatted message
+	pub fn fmt_with_data<M>(msg: M, data: D) -> Self
 	where
 		M: fmt::Display,
 	{
@@ -332,10 +358,7 @@ impl<D> AppError<D> {
 
 	/// Adds context to this error
 	#[must_use = "Creates a new error with context, without modifying the existing one"]
-	pub fn context_with_data<M>(&self, msg: M, data: D) -> Self
-	where
-		M: fmt::Display,
-	{
+	pub fn context_with_data(&self, msg: &'static str, data: D) -> Self {
 		Self {
 			inner: Arc::new(Inner::Single {
 				msg: msg.to_string().into(),
@@ -427,9 +450,7 @@ pub trait Context<D> {
 	type Output;
 
 	/// Adds context to this result, if it's an error
-	fn context<M>(self, msg: M) -> Self::Output
-	where
-		M: fmt::Display;
+	fn context(self, msg: &'static str) -> Self::Output;
 
 	/// Adds context to this result lazily, if it's an error
 	fn with_context<F, M>(self, with_msg: F) -> Self::Output
@@ -445,10 +466,7 @@ where
 {
 	type Output = Result<T, AppError<D>>;
 
-	fn context<M>(self, msg: M) -> Self::Output
-	where
-		M: fmt::Display,
-	{
+	fn context(self, msg: &'static str) -> Self::Output {
 		self.map_err(|err| AppError::new(&err).context(msg))
 	}
 
@@ -457,7 +475,7 @@ where
 		F: FnOnce() -> M,
 		M: fmt::Display,
 	{
-		self.map_err(|err| AppError::new(&err).context(with_msg()))
+		self.map_err(|err| AppError::new(&err).with_context(with_msg))
 	}
 }
 
@@ -467,10 +485,7 @@ where
 {
 	type Output = Self;
 
-	fn context<M>(self, msg: M) -> Self::Output
-	where
-		M: fmt::Display,
-	{
+	fn context(self, msg: &'static str) -> Self::Output {
 		self.map_err(|err| err.context(msg))
 	}
 
@@ -479,7 +494,7 @@ where
 		F: FnOnce() -> M,
 		M: fmt::Display,
 	{
-		self.map_err(|err| err.context(with_msg()))
+		self.map_err(|err| err.with_context(with_msg))
 	}
 }
 
@@ -489,10 +504,7 @@ where
 {
 	type Output = Result<T, AppError<D>>;
 
-	fn context<M>(self, msg: M) -> Self::Output
-	where
-		M: fmt::Display,
-	{
+	fn context(self, msg: &'static str) -> Self::Output {
 		self.ok_or_else(|| AppError::msg(msg))
 	}
 
@@ -501,7 +513,7 @@ where
 		F: FnOnce() -> M,
 		M: fmt::Display,
 	{
-		self.ok_or_else(|| AppError::msg(with_msg()))
+		self.ok_or_else(|| AppError::fmt(with_msg()))
 	}
 }
 
