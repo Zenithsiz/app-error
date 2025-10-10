@@ -13,7 +13,7 @@
 //! The inner representation is similar to `AppError = (String, Option<AppError>) | Vec<AppError>`.
 
 // Features
-#![feature(error_reporter, decl_macro, try_trait_v2, extend_one)]
+#![feature(decl_macro, try_trait_v2, extend_one, debug_closure_helpers)]
 #![cfg_attr(test, feature(assert_matches, coverage_attribute))]
 
 // Modules
@@ -135,8 +135,7 @@ where
 			},
 
 			// Otherwise, pretty print it
-			// TODO: Use our own pretty printer instead of this.
-			false => std::error::Report::new(self).pretty(true).fmt(f),
+			false => write!(f, "{}", PrettyDisplay::new(self)),
 		}
 	}
 }
@@ -311,7 +310,7 @@ impl<D> AppError<D> {
 	/// Returns an object that can be used for a pretty display of this error
 	#[must_use]
 	pub fn pretty(&self) -> PrettyDisplay<'_, D> {
-		PrettyDisplay::new(self)
+		PrettyDisplay::new(&self.inner)
 	}
 }
 
@@ -723,7 +722,7 @@ mod test {
 	#[test]
 	fn fmt_debug() {
 		let err = AppError::<()>::msg("A").context("B");
-		assert_eq!(format!("{err:?}"), "B\n\nCaused by:\n      A");
+		assert_eq!(format!("{err:?}"), "B\n└─A");
 		assert_eq!(
 			format!("{err:#?}"),
 			r#"AppError {
@@ -740,10 +739,7 @@ mod test {
 		);
 
 		let err_multiple = AppError::<()>::from_multiple([AppError::msg("A"), AppError::msg("B")]);
-		assert_eq!(
-			format!("{err_multiple:?}"),
-			"Multiple errors (2)\n\nCaused by:\n      A"
-		);
+		assert_eq!(format!("{err_multiple:?}"), "Multiple errors:\n├─A\n└─B");
 		assert_eq!(
 			format!("{err_multiple:#?}"),
 			r#"[
@@ -831,8 +827,27 @@ mod test {
 	fn pretty() {
 		let err = AppError::<()>::msg("A").context("B").context("C");
 		assert_eq!(
-			format!("{:?}", err.pretty()),
-			"PrettyDisplay { root: C\n\nCaused by:\n   0: B\n   1: A }"
+			format!("{:#?}", err.pretty()),
+			r#"PrettyDisplay {
+    root: AppError {
+        msg: "C",
+        source: Some(
+            AppError {
+                msg: "B",
+                source: Some(
+                    AppError {
+                        msg: "A",
+                        source: None,
+                        data: (),
+                    },
+                ),
+                data: (),
+            },
+        ),
+        data: (),
+    },
+    ignore_err: None,
+}"#
 		);
 		assert_eq!(
 			err.pretty().to_string(),
@@ -840,6 +855,7 @@ mod test {
 └─B
   └─A"
 		);
+		assert_eq!(err.pretty().to_string(), format!("{:?}", err.pretty()));
 
 		let err_multiple = AppError::<()>::from_multiple([AppError::msg("A"), AppError::msg("B")]);
 		assert_eq!(
@@ -874,7 +890,7 @@ mod test {
 			ignore: bool,
 		}
 
-		let fmt_err = |err: &AppError<D>| err.pretty().with_ignore_err(|_err, data| data.ignore).to_string();
+		let fmt_err = |err: &AppError<D>| err.pretty().with_ignore_err(|data| data.ignore).to_string();
 
 		// TODO: This is not correct behavior, we shouldn't display the ignored errors just because there's no multiple
 		let err = AppError::<D>::msg_with_data("A", D { ignore: true }).context("B");

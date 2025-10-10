@@ -11,11 +11,11 @@ use {
 /// Pretty display for [`AppError`]
 pub struct PrettyDisplay<'a, D = ()> {
 	/// Root error
-	root: &'a AppError<D>,
+	root: &'a Inner<D>,
 
 	/// Ignore error
 	// TODO: Make this a closure?
-	ignore_err: Option<fn(&AppError<D>, &D) -> bool>,
+	ignore_err: Option<fn(&D) -> bool>,
 }
 
 impl<D> fmt::Debug for PrettyDisplay<'_, D>
@@ -23,7 +23,14 @@ where
 	D: fmt::Debug + 'static,
 {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("PrettyDisplay").field("root", &self.root).finish()
+		match f.alternate() {
+			true => f
+				.debug_struct("PrettyDisplay")
+				.field_with("root", |f| write!(f, "{:#?}", self.root))
+				.field("ignore_err", &self.ignore_err.as_ref().map(|_| ()))
+				.finish(),
+			false => write!(f, "{self}"),
+		}
 	}
 }
 
@@ -45,13 +52,13 @@ impl Column {
 
 impl<'a, D> PrettyDisplay<'a, D> {
 	/// Creates a new pretty display
-	pub(crate) fn new(root: &'a AppError<D>) -> Self {
+	pub(crate) fn new(root: &'a Inner<D>) -> Self {
 		Self { root, ignore_err: None }
 	}
 
 	/// Adds a callback that chooses whether to ignore an error
 	#[must_use]
-	pub fn with_ignore_err(self, ignore_err: fn(&AppError<D>, &D) -> bool) -> Self {
+	pub fn with_ignore_err(self, ignore_err: fn(&D) -> bool) -> Self {
 		Self {
 			ignore_err: Some(ignore_err),
 			..self
@@ -59,9 +66,9 @@ impl<'a, D> PrettyDisplay<'a, D> {
 	}
 
 	/// Formats a single error
-	fn fmt_single(&self, f: &mut fmt::Formatter<'_>, err: &AppError<D>, columns: &mut Vec<Column>) -> fmt::Result {
+	fn fmt_single(&self, f: &mut fmt::Formatter<'_>, err: &Inner<D>, columns: &mut Vec<Column>) -> fmt::Result {
 		// If it's multiple, display it as multiple
-		let (msg, source) = match &*err.inner {
+		let (msg, source) = match err {
 			Inner::Single { msg, source, .. } => (msg, source),
 			Inner::Multiple(errs) => return self.fmt_multiple(f, errs, columns),
 		};
@@ -114,7 +121,7 @@ impl<'a, D> PrettyDisplay<'a, D> {
 		for (pos, err) in errs.iter().with_position() {
 			// If we should ignore the error, skip
 			if let Some(ignore_err) = self.ignore_err &&
-				self::should_ignore(err, ignore_err)
+				self::should_ignore(&err.inner, ignore_err)
 			{
 				ignored_errs += 1;
 				continue;
@@ -138,7 +145,7 @@ impl<'a, D> PrettyDisplay<'a, D> {
 				},
 			}
 
-			self.fmt_single(f, err, columns)?;
+			self.fmt_single(f, &err.inner, columns)?;
 			let _: Option<_> = columns.pop();
 		}
 
@@ -166,17 +173,17 @@ impl<D> fmt::Display for PrettyDisplay<'_, D> {
 }
 
 // Returns whether an error should be ignored
-fn should_ignore<D>(err: &AppError<D>, ignore_err: fn(&AppError<D>, &D) -> bool) -> bool {
-	match &*err.inner {
+fn should_ignore<D>(err: &Inner<D>, ignore_err: fn(&D) -> bool) -> bool {
+	match err {
 		// When dealing with a single error, we ignore if it any error in it's tree, including itself
 		// should be ignored.
 		Inner::Single { source, data, .. } =>
-			ignore_err(err, data) ||
+			ignore_err(data) ||
 				source
 					.as_ref()
-					.is_some_and(|source| self::should_ignore(source, ignore_err)),
+					.is_some_and(|source| self::should_ignore(&source.inner, ignore_err)),
 
 		// For multiple errors, we only ignore it if all should be ignored.
-		Inner::Multiple(errs) => errs.iter().all(|err| self::should_ignore(err, ignore_err)),
+		Inner::Multiple(errs) => errs.iter().all(|err| self::should_ignore(&err.inner, ignore_err)),
 	}
 }
