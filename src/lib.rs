@@ -706,6 +706,18 @@ mod test {
 	}
 
 	#[test]
+	fn eq_data() {
+		#[derive(PartialEq, Debug)]
+		struct D(usize);
+
+		let err1 = AppError::msg_with_data("A", D(0));
+		assert_eq!(err1, err1);
+
+		let err2 = AppError::msg_with_data("A", D(1));
+		assert_ne!(err1, err2);
+	}
+
+	#[test]
 	fn hash() {
 		let mut errs = HashSet::new();
 		let err = AppError::<()>::msg("A");
