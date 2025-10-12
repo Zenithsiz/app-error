@@ -33,7 +33,7 @@ pub use self::{multiple::AllErrs, pretty::PrettyDisplay};
 
 // Imports
 use {
-	core::{mem, ops::Try},
+	core::{mem, slice},
 	std::{
 		borrow::Cow,
 		error::Error as StdError,
@@ -321,56 +321,16 @@ impl<D> AppError<D> {
 		PrettyDisplay::new(&self.inner)
 	}
 
-	/// Returns if any data in this error matches `predicate`
-	pub fn data_any<P: FnMut(&D) -> bool>(&self, mut predicate: P) -> bool {
-		fn inner<D, P: FnMut(&D) -> bool>(err: &AppError<D>, predicate: &mut P) -> bool {
-			match &*err.inner {
-				Inner::Single { source, data, .. } =>
-					predicate(data) || source.as_ref().is_some_and(|err| inner(err, predicate)),
-				Inner::Multiple(errs) => errs.iter().any(|err| inner(err, predicate)),
-			}
+	/// Returns an iterator over all data in this error, recursively.
+	///
+	/// # Order
+	/// No order is guaranteed and it may change at any time.
+	#[must_use]
+	pub fn data_iter(&self) -> DataIter<'_, D> {
+		DataIter {
+			errs:   vec![self],
+			cur_it: None,
 		}
-
-		inner(self, &mut predicate)
-	}
-
-	/// Visits all data within this error
-	pub fn data_visit<V>(&self, mut visitor: V)
-	where
-		V: FnMut(&D),
-	{
-		self.data_try_visit::<Result<(), !>, _>(|data| {
-			visitor(data);
-			Ok(())
-		})
-		.into_ok();
-	}
-
-	/// Tries to visit all data within this error
-	pub fn data_try_visit<T, V>(&self, mut visitor: V) -> T
-	where
-		T: Try<Output = ()>,
-		V: FnMut(&D) -> T,
-	{
-		fn inner<D, T, V>(err: &AppError<D>, visitor: &mut V) -> T
-		where
-			T: Try<Output = ()>,
-			V: FnMut(&D) -> T,
-		{
-			match &*err.inner {
-				Inner::Single { source, data, .. } => {
-					visitor(data)?;
-					if let Some(source) = source {
-						inner(source, visitor)?;
-					}
-
-					T::from_output(())
-				},
-				Inner::Multiple(errs) => errs.iter().try_for_each(|err| inner(err, visitor)),
-			}
-		}
-
-		inner(self, &mut visitor)
 	}
 }
 
@@ -503,6 +463,65 @@ where
 {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		self.inner.fmt(f)
+	}
+}
+
+/// Data iterator
+#[derive(Clone, Debug)]
+pub struct DataIter<'a, D: 'static> {
+	/// Error stack
+	errs: Vec<&'a AppError<D>>,
+
+	/// Current multiple iter
+	cur_it: Option<slice::Iter<'a, AppError<D>>>,
+}
+
+impl<'a, D: 'static> Iterator for DataIter<'a, D> {
+	type Item = (&'a AppError<D>, &'a D);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		loop {
+			// Get the next error to check
+			let next_err = 'next_err: {
+				// If we're in the middle of an iterator, and we got a new one, then use it
+				if let Some(cur_it) = &mut self.cur_it {
+					match cur_it.next() {
+						Some(err) => break 'next_err err,
+						// Note: Remember to remove the iterator once exhausted
+						None => self.cur_it = None,
+					}
+				}
+
+				// Otherwise, use our next error from the stack
+				match self.errs.pop() {
+					Some(err) => break 'next_err err,
+					// If we have no more errors in the stack, we're done
+					None => return None,
+				}
+			};
+
+			// Then check if we can use it
+			match &*next_err.inner {
+				// If it's just a single error, yield the data and stack it's
+				// source onto the stack for next.
+				Inner::Single { source, data, .. } => {
+					if let Some(source) = source {
+						self.errs.push(source);
+					}
+
+					break Some((next_err, data));
+				},
+
+				// Otherwise, if it's multiple
+				Inner::Multiple(errs) => match &self.cur_it {
+					// If we're already iterating, save it for later
+					Some(_) => self.errs.push(next_err),
+
+					// Otherwise, use it as our current iterator
+					None => self.cur_it = Some(errs.iter()),
+				},
+			}
+		}
 	}
 }
 
@@ -883,7 +902,7 @@ mod test {
 
 	#[test]
 	fn data_from_std() {
-		#[derive(PartialEq, Clone, Debug)]
+		#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 		struct D(usize);
 
 		let std_err = StdE {
@@ -895,13 +914,10 @@ mod test {
 		};
 
 		let err = AppError::<D>::new_with_data(&std_err, D(5));
-		assert!(err.data_any(|d| d.0 == 5));
-		let mut count = 0;
-		err.data_visit(|d| {
-			assert_eq!(d.0, 5);
-			count += 1;
-		});
-		assert_eq!(count, 2);
+		assert_eq!(
+			err.data_iter().map(|(_, &d)| d).collect::<HashSet<_>>(),
+			[D(5), D(5)].into()
+		);
 		assert_eq!(
 			err,
 			AppError::<D>::msg_with_data("B", D(5)).with_context_with_data(|| "A", D(5))
@@ -910,70 +926,54 @@ mod test {
 
 	#[test]
 	fn data() {
-		#[derive(PartialEq, Clone, Debug)]
+		#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 		struct D(usize);
 
 		let err = AppError::<D>::fmt_with_data("B", D(4)).context_with_data("A", D(5));
-		assert!(err.data_any(|d| d.0 == 4));
-		assert!(err.data_any(|d| d.0 == 5));
-		let mut count = 0;
-		err.data_visit(|d| {
-			match count {
-				0 => assert_eq!(d.0, 5),
-				1 => assert_eq!(d.0, 4),
-				_ => unreachable!(),
-			}
-			count += 1;
-		});
-		assert_eq!(count, 2);
-
 		assert_eq!(
-			err.data_try_visit(|d| match d.0 {
-				5 => Err(()),
-				4 => panic!("Visited data after error"),
-				_ => unreachable!(),
-			}),
-			Err(())
-		);
-		assert_eq!(
-			err.data_try_visit(|d| match d.0 {
-				5 => Ok(()),
-				4 => Err(()),
-				_ => unreachable!(),
-			}),
-			Err(())
+			err.data_iter().map(|(_, &d)| d).collect::<HashSet<_>>(),
+			[D(5), D(4)].into()
 		);
 	}
 
 	#[test]
 	fn data_multiple() {
-		#[derive(PartialEq, Clone, Debug)]
+		#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 		struct D(usize);
 
 		let err = AppError::from_multiple([AppError::msg_with_data("A", D(1)), AppError::msg_with_data("B", D(2))]);
-		assert!(err.data_any(|d| match d.0 {
-			1 => true,
-			2 => panic!("Visited data after true"),
-			_ => unreachable!(),
-		}));
-
-		let mut count = 0;
-		err.data_visit(|d| {
-			match count {
-				0 => assert_eq!(d.0, 1),
-				1 => assert_eq!(d.0, 2),
-				_ => unreachable!(),
-			}
-			count += 1;
-		});
-		assert_eq!(count, 2);
+		assert_eq!(
+			err.data_iter().map(|(_, &d)| d).collect::<HashSet<_>>(),
+			[D(1), D(2)].into()
+		);
 	}
 
 	#[test]
 	fn data_empty() {
-		let err_empty = AppError::<!>::from_multiple([]);
-		assert!(!err_empty.data_any(|_| panic!("Visited data")));
-		err_empty.data_visit(|_| panic!("Visited data"));
+		let err = AppError::<!>::from_multiple([]);
+		assert_eq!(err.data_iter().map(|(_, &d)| d).collect::<Vec<_>>(), []);
+	}
+
+	#[test]
+	fn data_complex() {
+		#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+		struct D(usize);
+
+		let err = AppError::<D>::from_multiple([
+			AppError::msg_with_data("B", D(1)).context_with_data("A", D(0)),
+			AppError::from_multiple([
+				AppError::msg_with_data("C", D(2)),
+				AppError::msg_with_data("D", D(3)),
+				AppError::from_multiple([AppError::msg_with_data("E", D(4)), AppError::msg_with_data("F", D(5))]),
+				AppError::from_multiple([AppError::msg_with_data("G", D(6)), AppError::msg_with_data("H", D(7))]),
+			]),
+			AppError::from_multiple([AppError::msg_with_data("I", D(8))]),
+			AppError::msg_with_data("J", D(9)),
+		]);
+		assert_eq!(
+			err.data_iter().map(|(_, &d)| d).collect::<HashSet<_>>(),
+			(0..=9).map(D).collect()
+		);
 	}
 
 	#[test]
