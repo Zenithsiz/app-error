@@ -599,7 +599,7 @@ where
 
 /// A macro that formats and creates an [`AppError`]
 pub macro app_error {
-	($msg:expr $(,)?) => {
+	($msg:literal $(,)?) => {
 		// TODO: Check if it's a static string as compile time?
 		match format_args!($msg) {
 			msg => match msg.as_str() {
@@ -610,31 +610,31 @@ pub macro app_error {
 
 	},
 
-	($fmt:expr, $($arg:expr),* $(,)?) => {
+	($fmt:literal, $($arg:expr),* $(,)?) => {
 		$crate::AppError::fmt( format!($fmt, $($arg,)*) )
 	},
 }
 
 /// A macro that returns an error
 pub macro bail {
-	($msg:expr $(,)?) => {
+	($msg:literal $(,)?) => {
 		do yeet $crate::app_error!($msg)
 	},
 
-	($fmt:expr, $($arg:expr),* $(,)?) => {
+	($fmt:literal, $($arg:expr),* $(,)?) => {
 		do yeet $crate::app_error!($fmt, $($arg),*)
 	},
 }
 
 /// A macro that returns an error if a condition is false
 pub macro ensure {
-	($cond:expr, $msg:expr $(,)?) => {
+	($cond:expr, $msg:literal $(,)?) => {
 		if !$cond {
 			do yeet $crate::app_error!($msg);
 		}
 	},
 
-	($cond:expr, $fmt:expr, $($arg:expr),* $(,)?) => {
+	($cond:expr, $fmt:literal, $($arg:expr),* $(,)?) => {
 		if !$cond {
 			do yeet $crate::app_error!($fmt, $($arg),*);
 		}
