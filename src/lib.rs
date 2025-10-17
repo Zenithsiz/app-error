@@ -275,26 +275,36 @@ impl<D> AppError<D> {
 			}
 		}
 
-		match Arc::unwrap_or_clone(self.inner) {
-			// If we're a single error, recurse
-			Inner::Single { msg, source, data } => Self {
-				inner: Arc::new(Inner::Single {
-					msg,
-					source: source.map(Self::flatten),
-					data,
+		fn flatten_inner<D: Clone>(err: AppError<D>) -> Option<AppError<D>> {
+			match Arc::unwrap_or_clone(err.inner) {
+				// If we're a single error, recurse
+				Inner::Single { msg, source, data } => Some(AppError {
+					inner: Arc::new(Inner::Single {
+						msg,
+						source: source.and_then(flatten_inner),
+						data,
+					}),
 				}),
-			},
 
-			// Otherwise, flatten all errors
-			Inner::Multiple(errs) => {
-				let mut flattened_errs = vec![];
-				for err in errs {
-					flatten_into(err, &mut flattened_errs);
-				}
+				// Otherwise, flatten all errors
+				Inner::Multiple(errs) => {
+					let mut flattened_errs = vec![];
+					for err in errs {
+						flatten_into(err, &mut flattened_errs);
+					}
 
-				Self::from_multiple(flattened_errs)
-			},
+					match <[_; 0]>::try_from(flattened_errs) {
+						Ok([]) => None,
+						Err(flattened_errs) => match <[_; 1]>::try_from(flattened_errs) {
+							Ok([err]) => Some(err),
+							Err(flattened_errs) => Some(AppError::from_multiple(flattened_errs)),
+						},
+					}
+				},
+			}
 		}
+
+		flatten_inner(self).unwrap_or_else(|| Self::from_multiple([]))
 	}
 
 	/// Returns this type as a [`std::error::Error`]
@@ -1119,6 +1129,7 @@ mod test {
 				.context("G1")
 				.context("G2"),
 			]),
+			AppError::from_multiple([AppError::msg("K")]).context("L"),
 		]);
 
 		let found = err.flatten();
@@ -1132,6 +1143,7 @@ mod test {
 			AppError::from_multiple([AppError::msg("H"), AppError::msg("I"), AppError::msg("J")])
 				.context("G1")
 				.context("G2"),
+			AppError::msg("K").context("L"),
 		]);
 
 		assert!(
