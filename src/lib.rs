@@ -988,15 +988,15 @@ mod test {
 
 	#[test]
 	fn pretty() {
-		let err = AppError::<()>::msg("A").context("B").context("C");
+		let err = AppError::<()>::msg("A").context("B\nC").context("D");
 		assert_eq!(
 			format!("{:#?}", err.pretty()),
 			r#"PrettyDisplay {
     root: AppError {
-        msg: "C",
+        msg: "D",
         source: Some(
             AppError {
-                msg: "B",
+                msg: "B\nC",
                 source: Some(
                     AppError {
                         msg: "A",
@@ -1014,8 +1014,9 @@ mod test {
 		);
 		assert_eq!(
 			err.pretty().to_string(),
-			r"C
+			r"D
 └─B
+  C
   └─A"
 		);
 		assert_eq!(err.pretty().to_string(), format!("{:?}", err.pretty()));
@@ -1029,8 +1030,8 @@ mod test {
 		);
 
 		let err_multiple_deep = AppError::<()>::from_multiple([
-			AppError::from_multiple([AppError::msg("A"), AppError::msg("B")])
-				.context("C")
+			AppError::from_multiple([AppError::msg("A\nA2"), AppError::msg("B\nB2")])
+				.context("C\nC2")
 				.context("D"),
 			AppError::msg("E"),
 		]);
@@ -1039,9 +1040,12 @@ mod test {
 			r"Multiple errors:
 ├─D
 │ └─C
+│   C2
 │   └─Multiple errors:
 │     ├─A
+│     │ A2
 │     └─B
+│       B2
 └─E"
 		);
 	}

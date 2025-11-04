@@ -65,6 +65,23 @@ impl<'a, D> PrettyDisplay<'a, D> {
 		}
 	}
 
+	/// Formats the message of an error
+	#[expect(clippy::unused_self, reason = "We might use it in the future")]
+	fn fmt_msg(&self, f: &mut fmt::Formatter<'_>, msg: &str, columns: &[Column]) -> fmt::Result {
+		for (msg_pos, msg) in msg.split_inclusive('\n').with_position() {
+			// If we already had a newline, then we need to pad all the columns again
+			if matches!(msg_pos, ItertoolsPos::Middle | ItertoolsPos::Last) {
+				for c in columns {
+					f.pad(c.as_str())?;
+				}
+			}
+
+			write!(f, "{msg}")?;
+		}
+
+		Ok(())
+	}
+
 	/// Formats a single error
 	fn fmt_single(&self, f: &mut fmt::Formatter<'_>, err: &Inner<D>, columns: &mut Vec<Column>) -> fmt::Result {
 		// If it's multiple, display it as multiple
@@ -74,7 +91,7 @@ impl<'a, D> PrettyDisplay<'a, D> {
 		};
 
 		// Else write the top-level error
-		write!(f, "{msg}")?;
+		self.fmt_msg(f, msg, columns)?;
 
 		// Then, if there's a cause, write the rest
 		if let Some(mut cur_source) = source.as_ref() {
@@ -91,7 +108,7 @@ impl<'a, D> PrettyDisplay<'a, D> {
 				// Then check if we got to a multiple.
 				match &*cur_source.inner {
 					Inner::Single { msg, source, .. } => {
-						write!(f, "{msg}",)?;
+						self.fmt_msg(f, msg, columns)?;
 
 						// And descend
 						cur_source = match source {
