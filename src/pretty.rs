@@ -131,6 +131,7 @@ impl<'a, D> PrettyDisplay<'a, D> {
 	/// Formats multiple errors
 	fn fmt_multiple(&self, f: &mut fmt::Formatter<'_>, errs: &[AppError<D>], columns: &mut Vec<Column>) -> fmt::Result {
 		// Write the top-level error
+		// TODO: Allow customizing this.
 		write!(f, "Multiple errors:")?;
 
 		// For each error, write it
