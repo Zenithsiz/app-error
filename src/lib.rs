@@ -588,6 +588,25 @@ where
 	}
 }
 
+impl<T, D> Context<D> for Result<T, &AppError<D>>
+where
+	D: Default,
+{
+	type Output = Result<T, AppError<D>>;
+
+	fn context(self, msg: &'static str) -> Self::Output {
+		self.map_err(|err| err.context(msg))
+	}
+
+	fn with_context<F, M>(self, with_msg: F) -> Self::Output
+	where
+		F: FnOnce() -> M,
+		M: fmt::Display,
+	{
+		self.map_err(|err| err.with_context(with_msg))
+	}
+}
+
 impl<T, D> Context<D> for Option<T>
 where
 	D: Default,
