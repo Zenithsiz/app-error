@@ -5,6 +5,10 @@ edition = "2024"
 description = "Error type for applications"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/zenithsiz/app-error"
+homepage = "https://github.com/zenithsiz/app-error"
+categories = ["rust-patterns"]
+keywords = ["error", "error-handling"]
+authors = ["Filipe Rodrigues <filipejacintorodrigues1@gmail.com>"]
 
 [dependencies]
 
@@ -25,7 +29,7 @@ clippy.unwrap_used = "deny"
 
 # Style
 clippy.match_bool = "allow"
-clippy.single_match_else = "allow"        # Note: `match` reads easier than `if / else`
+clippy.single_match_else = "allow"      # Note: `match` reads easier than `if / else`
 clippy.option_if_let_else = "allow"
 clippy.items_after_statements = "allow"
 clippy.module_inception = "allow"
