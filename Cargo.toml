@@ -1,14 +1,14 @@
 [package]
-name = "app-error"
-version = "0.1.0"
-edition = "2024"
+authors     = ["Filipe Rodrigues <filipejacintorodrigues1@gmail.com>"]
+categories  = ["rust-patterns"]
 description = "Error type for applications"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/zenithsiz/app-error"
-homepage = "https://github.com/zenithsiz/app-error"
-categories = ["rust-patterns"]
-keywords = ["error", "error-handling"]
-authors = ["Filipe Rodrigues <filipejacintorodrigues1@gmail.com>"]
+edition     = "2024"
+homepage    = "https://github.com/zenithsiz/app-error"
+keywords    = ["error", "error-handling"]
+license     = "MIT OR Apache-2.0"
+name        = "app-error"
+repository  = "https://github.com/zenithsiz/app-error"
+version     = "0.1.0"
 
 [dependencies]
 
@@ -17,31 +17,31 @@ itertools = "0.14.0"
 [lints]
 
 # Group lints
+clippy.nursery  = { level = "warn", priority = -1 }
 clippy.pedantic = { level = "warn", priority = -1 }
-clippy.nursery = { level = "warn", priority = -1 }
 
 # This project doesn't require unsafe code
-rust.unsafe_code = "forbid"
+rust.unsafe_code            = "forbid"
 rust.unsafe_op_in_unsafe_fn = "forbid"
 
 # Must use `expect` instead of `unwrap`
 clippy.unwrap_used = "deny"
 
 # Style
-clippy.match_bool = "allow"
-clippy.single_match_else = "allow"      # Note: `match` reads easier than `if / else`
-clippy.option_if_let_else = "allow"
 clippy.items_after_statements = "allow"
-clippy.module_inception = "allow"
+clippy.match_bool             = "allow"
+clippy.module_inception       = "allow"
+clippy.option_if_let_else     = "allow"
+clippy.single_match_else      = "allow" # Note: `match` reads easier than `if / else`
 
 # Misc.
-rust.noop_method_call = "warn"
-rust.unused_results = "warn"
+clippy.let_underscore_untyped       = "warn"
 rust.explicit_outlives_requirements = "warn"
-rust.meta_variable_misuse = "warn"
-rust.single_use_lifetimes = "warn"
-rust.trivial_numeric_casts = "warn"
-rust.unused_lifetimes = "warn"
-rust.unused_macro_rules = "warn"
-rust.variant_size_differences = "warn"
-clippy.let_underscore_untyped = "warn"
+rust.meta_variable_misuse           = "warn"
+rust.noop_method_call               = "warn"
+rust.single_use_lifetimes           = "warn"
+rust.trivial_numeric_casts          = "warn"
+rust.unused_lifetimes               = "warn"
+rust.unused_macro_rules             = "warn"
+rust.unused_results                 = "warn"
+rust.variant_size_differences       = "warn"
