@@ -1,14 +1,16 @@
 //! App errors
 //!
-//! This crate provides an error type, [`AppError`], that is intended for usage in apps.
+//! This crate provides an error type, [`AppError`], that is intended for usage in applications.
 //!
-//! It is [`Send`], [`Sync`], `'static`, and importantly cheaply [`Clone`]-able.
+//! It is [`Send`], [`Sync`], `'static`, and, importantly, cheaply [`Clone`]-able.
 //!
 //! To achieve this, it serializes every error it receives without owning it, meaning that
 //! you also can't retrieve the error later by downcasting it.
 //!
 //! It is also able to store multiple errors at once and provide pretty-printing of all
 //! of these them.
+//!
+//! It can carry an optional data parameter that may be retrieved later on.
 //!
 //! The inner representation is similar to `AppError = (String, Option<AppError>) | Vec<AppError>`.
 
@@ -150,8 +152,8 @@ where
 
 /// A reference-counted untyped error that can be created from any error type.
 ///
-/// Named `AppError` as it's mostly useful in apps that don't care about the errors
-/// specifically, and instead only care to show them to users.
+/// Named `AppError` as it's mostly useful in application code that don't care
+/// about the errors specifically, and instead only care to show them to users.
 pub struct AppError<D = ()> {
 	/// Inner
 	inner: Arc<Inner<D>>,
@@ -257,7 +259,7 @@ impl<D> AppError<D> {
 		}
 	}
 
-	/// Flattens all neighbor multiple errors into a single one.
+	/// Flattens all multiple errors recursively.
 	#[must_use]
 	pub fn flatten(self) -> Self
 	where
